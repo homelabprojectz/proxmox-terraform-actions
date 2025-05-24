@@ -1,0 +1,91 @@
+name: Terraform - Run checks on self-hosted runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: TF command
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+      lock:
+        description: TF lock
+        required: false
+        type: boolean
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+env:
+  TF_LOG: INFO
+  PM_API_URL: ${{ secrets.PM_API_URL }}
+  PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID }}
+  PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET }}
+  TF_TOKEN_app_terraform_io: ${{ secrets.TFC_TOKEN }}
+
+jobs:
+  Terraform-checks:
+    name: 'Terraform - Run checks on self-hosted runner'
+    runs-on: self-hosted
+
+    permissions:
+      actions: read
+      checks: write
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure Terraform Cloud credentials
+        run: |
+          mkdir -p ~/.terraform.d
+          cat <<EOF > ~/.terraformrc
+          credentials "app.terraform.io" {
+            token = "${TF_TOKEN_app_terraform_io}"
+          }
+          EOF
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TFC_TOKEN }}
+
+      - name: Write secrets to tfvars
+        run: |
+          cat <<EOF > secrets.auto.tfvars
+          pm_api_url          = "${PM_API_URL}"
+          pm_api_token_id     = "${PM_API_TOKEN_ID}"
+          pm_api_token_secret = "${PM_API_TOKEN_SECRET}"
+          EOF
+        working-directory: ./main
+
+      - name: Clean plugin cache to avoid wrong provider fallback
+        run: rm -rf ~/.terraform.d/plugin-cache || true
+
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: ./main
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: ./main
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -input=false | tee plan_output.txt
+        working-directory: ./main
+        continue-on-error: true
+
+      - name: Comment plan output on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          recreate: true
+          path: ./main/plan_output.txt

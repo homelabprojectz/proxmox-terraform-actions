@@ -1,0 +1,47 @@
+name: 'Terraform - Apply to production environment'
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  TF_LOG: INFO
+  PM_API_URL: ${{ secrets.PM_API_URL }}
+  PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID }}
+  PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET }}
+  TF_TOKEN_app_terraform_io: ${{ secrets.TFC_TOKEN }}
+
+jobs:
+  terraform:
+    name: 'Terraform Apply to production environment'
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Write secrets to tfvars
+        run: |
+          cat <<EOF > secrets.auto.tfvars
+          pm_api_url          = "${PM_API_URL}"
+          pm_api_token_id     = "${PM_API_TOKEN_ID}"
+          pm_api_token_secret = "${PM_API_TOKEN_SECRET}"
+          EOF
+        working-directory: ./main
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+        working-directory: ./main
+
+      - name: Terraform Plan
+        run: terraform plan
+        working-directory: ./main
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        working-directory: ./main
